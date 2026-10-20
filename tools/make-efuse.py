@@ -13,7 +13,7 @@
 # major * 100 + minor, reading the two halves through the per-chip
 # efuse_ll_get_chip_wafer_version_{major,minor}() accessors. CHIPS below
 # mirrors those bit positions from components/efuse/<chip>/esp_efuse_table.csv;
-# The inject entries mirror EfuseChipConfig::default_wafer_* in
+# The inject_bits entries mirror EfuseChipConfig::default_wafer_bits in
 # src/periph/<chip>/efuse.rs, so the script rejects any revision the emulator
 # would override rather than emitting a blob that boots as something else.
 
@@ -29,9 +29,8 @@ import sys
 #                  esp-emu's defaults wholesale, so without this the bootloader
 #                  reports "efuse block revision: v0.0" and ADC calibration
 #                  stops matching a real devkit.
-#   inject:        BLK1 (word, mask) pairs covering every wafer field, and
-#                  inject_bits the (word, bits) pairs esp-emu ORs in when all
-#                  the masked words read zero.
+#   inject_bits:   BLK1 (word, bits) pairs esp-emu ORs in when MAJOR and MINOR
+#                  both read zero (Efuse::chip_revision() == 0).
 #   max_rev:       <chip>_REV_MAX_FULL from IDF's Kconfig.hw_support. Above it
 #                  the 2nd-stage bootloader rejects every image, so a request
 #                  that high is almost certainly a typo.
@@ -41,42 +40,49 @@ CHIPS = {
         "minor": [(1, 114, 3), (1, 183, 1)],
         "major": [(1, 184, 2)],
         "calib": (2, 128, 2, 1),  # BLK_VERSION_MAJOR = 1
-        "inject": [(3, 0x7 << 18), (5, 0x0380_0000)], "inject_bits": [(3, 3 << 18)],
+        "inject_bits": [(3, 3 << 18)],
     },
     "esp32c5": {
         "max_rev": 199,
         "minor": [(1, 64, 4)],
         "major": [(1, 68, 2)],
         "calib": (1, 72, 3, 1),  # BLK_VERSION_MINOR = 1
-        "inject": [(2, 0x3F)], "inject_bits": [(2, 1 << 4)],
+        "inject_bits": [(2, 1 << 4)],
     },
     "esp32c6": {
         "max_rev": 99,
         "minor": [(1, 114, 4)],
         "major": [(1, 118, 2)],
         "calib": (1, 123, 3, 1),
-        "inject": [(3, 0x3F << 18)], "inject_bits": [(3, 3 << 18)],
+        "inject_bits": [(3, 3 << 18)],
     },
     "esp32h2": {
         "max_rev": 199,
         "minor": [(1, 114, 3)],
         "major": [(1, 117, 2)],
         "calib": (2, 130, 3, 1),
-        "inject": [(3, 0x1F << 18)], "inject_bits": [(3, 2 << 18)],
+        "inject_bits": [(3, 2 << 18)],
     },
     "esp32p4": {
         "max_rev": 399,
         "minor": [(1, 64, 4)],
         "major": [(1, 68, 2), (1, 87, 1)],
         "calib": None,
-        "inject": [(2, 0x0080003F)], "inject_bits": [(2, (1 << 0) | (3 << 4))],
+        "inject_bits": [(2, (1 << 0) | (3 << 4))],
+    },
+    "esp32s3": {
+        "max_rev": 99,
+        "minor": [(1, 114, 3), (1, 183, 1)],
+        "major": [(1, 184, 2)],
+        "calib": (2, 128, 2, 1),  # BLK_VERSION_MAJOR = 1
+        "inject_bits": [],
     },
     "esp32s31": {
         "max_rev": 99,
         "minor": [(1, 114, 4)],
         "major": [(1, 118, 2)],
         "calib": None,
-        "inject": [(3, 0x3F << 18)], "inject_bits": [],
+        "inject_bits": [],
     },
 }
 
@@ -132,8 +138,7 @@ def effective(chip, words):
     """The (major, minor) esp-emu will report for this blob, after injection."""
     spec = CHIPS[chip]
     words = list(words)
-    blank = all(words[BLK_WORD_BASE[1] + w] & m == 0 for w, m in spec["inject"])
-    if blank:
+    if get(words, spec["major"]) == 0 and get(words, spec["minor"]) == 0:
         for w, bits in spec["inject_bits"]:
             words[BLK_WORD_BASE[1] + w] |= bits
     return get(words, spec["major"]), get(words, spec["minor"])

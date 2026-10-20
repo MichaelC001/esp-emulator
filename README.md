@@ -56,8 +56,8 @@ test_apps/run_smoke.sh --chips esp32c3,esp32c6
 
 ## Features
 
-- **CPU**: Full RV32IMAC on C3/C5/C6/H2; RV32IMAFC (with single-precision FP via Berkeley SoftFloat) on P4; Xtensa LX7 (dual-core, windowed registers, zero-overhead loops, FPU) on S3. Multi-hart scheduler supports P4's dual HP cores. RV32 PMP and Espressif PMA enforced via a fused two-level page table — catches the same access violations as silicon (IDF panic memprot tests, TEE REE-vs-TEE isolation, IRAM/IROM write protection). P4 also runs the PIE SIMD instructions that ESP-SR, esp-dl and esp-nn use.
-- **Access permission control**: the APM and TEE permission controllers (C5, C6, H2, S31) and P4's PMS are enforced for the CPU and DMA, so ESP-TEE and other isolation firmware sees the same faults and violation reports as silicon
+- **CPU**: Full RV32IMAC on C3/C5/C6/H2; RV32IMAFC (with single-precision FP via Berkeley SoftFloat) on P4; Xtensa LX7 (dual-core, windowed registers, zero-overhead loops, MAC16, FPU) on S3. Multi-hart scheduler supports P4's dual HP cores. RV32 PMP and Espressif PMA enforced via a fused two-level page table — catches the same access violations as silicon (IDF panic memprot tests, TEE REE-vs-TEE isolation, IRAM/IROM write protection). P4 and S31 run the whole PIE SIMD instruction set that ESP-SR, esp-dl and esp-nn use, checked bit for bit against silicon.
+- **Access permission control**: the APM and TEE permission controllers (C5, C6, H2, S31), P4's PMS and the `SENSITIVE` PMS monitors on C3 and S3 are enforced for the CPU and DMA, so ESP-TEE, IDF's memprot app and other isolation firmware see the same faults and violation reports as silicon
 - **WiFi**: Soft AP with WPA2-PSK, WPA3-SAE (PMF, H2E, transition mode) and WPA2/WPA3-Enterprise (802.1X relayed to a RADIUS server), 802.11 management frames, DHCP server, and TAP networking for real connectivity
 - **Ethernet**: OpenCores Ethernet MAC (OpenETH) for QEMU-compatible `CONFIG_ETH_USE_OPENETH` firmware, plus Synopsys DesignWare GMAC for ESP32-P4's built-in EMAC
 - **Networking backends**: user-mode (zero-setup, QEMU-style NAT via smoltcp — DHCP, DNS forwarder, mDNS relay with optional record-rewriting NAT for Matter/HomeKit-style service discovery, IPv6 SLAAC, `hostfwd`, restrict mode, ICMP echo), TAP bridge (Linux), vmnet (macOS)
@@ -96,13 +96,13 @@ esp-emu --chip esp32c3 --firmware build/merged-binary.bin
 | `--chip <CHIP>` | (required) | Target chip: `esp32c3`, `esp32c5`, `esp32c6`, `esp32h2`, `esp32p4`, `esp32s3`, or `esp32s31` |
 | `--firmware <PATH>` | (required) | Path to merged flash binary |
 | `--rom <PATH>` | embedded | Path to ROM ELF file (overrides the built-in default for `--chip`) |
-| `--elf <PATH>` | — | Path to application ELF for BLE symbol lookup (e.g. `build/project.elf`) |
+| `--elf <PATH>...` | — | Application ELF(s) for BLE/Thread interception, panic intercepts and symbolised backtraces (e.g. `build/project.elf`). At app start the emulator reads the ELF SHA-256 the running app's descriptor records and uses the ELF it names, so pass both builds for an OTA test (`--elf old.elf new.elf`) and the new build's ELF takes over at the reboot. An ELF from some other build stays out, with a warning. |
 | `--no-panic-intercept` | off | With `--elf`, don't stop at the first firmware panic: the firmware's own panic handler runs and reboots or halts per its sdkconfig. For firmware that panics on purpose (task-watchdog reset tests, deliberate `abort()`); backtraces and BLE interception stay. |
 | `--efuse <PATH>` | — | Path to eFuse binary (336 bytes, QEMU-compatible). State is always saved back on exit (eFuses are one-time-programmable). |
 | `--timeout <DURATION>` | — | Exit after duration (e.g. `5s`, `500ms`) |
 | `--exit-on <STRING>` | — | Exit with code 0 when UART output contains this string |
 | `--batch-size <N>` | `50000` | Instructions per iteration |
-| `--skip-bootloader` | off | Load app directly from partition table, skipping 2nd-stage bootloader (firmware-entry path; only meaningful with `--skip-rom`) |
+| `--skip-bootloader` | off | Load app directly from partition table, skipping 2nd-stage bootloader (firmware-entry path; only meaningful with `--skip-rom`). Picks the app the IDF bootloader would: the OTA slot `otadata` selects, else `factory`, else `ota_0`, probing the other slots when the chosen one is empty |
 | `--skip-rom` | off | Reset the CPU at the firmware/bootloader entry instead of the real mask ROM. Default executes the ROM, which is required for KEY_SOURCE_KEY_MGR flash-key recovery and other eFuse-driven cold-boot decisions. |
 | `--save-state` | off | Save flash state to disk on exit (overwrites firmware file) |
 | `--inject <DATA>` | — | Payload to inject into UART RX (supports `\n` escape). Repeatable. |
@@ -123,7 +123,9 @@ esp-emu --chip esp32c3 --firmware build/merged-binary.bin
 | `--gdb <PORT>` | — | Serve a GDB remote stub on this port (QEMU's `-s` is 1234). `riscv32-esp-elf-gdb` / `xtensa-esp32s3-elf-gdb` connect with `target remote :PORT`. |
 | `--gdb-halt` | off | Hold the CPU at the reset vector until a GDB client connects (QEMU's `-S`). |
 | `--trace <FILE>` | — | Write a per-task Chrome Trace Event trace for Perfetto; requires `--elf`. `--trace-pc-period N` sets the PC sample rate for the hot-symbol table (default 16 ticks, 0 disables). See [Execution Tracing and Profiling](#execution-tracing-and-profiling). |
+| `--i2c-dev <PORT:ADDR[,OPTS]>` | — | Put an I2C device at 7-bit `ADDR` on HP I2C port `PORT`, beside the built-in EEPROM at 0x50. It ACKs and reads back what was written, so a board's IO expander, touch controller, PMIC or sensor gets past init. Repeatable. Options: `width=2` (16-bit register addresses), `fill=0xNN` (initial register value, default 0xFF), `reg=REG=VAL` (preload a register, e.g. a chip ID). See [I2C Devices](#i2c-devices). |
 | `--rmt-loopback <TX:RX>` | — | Feed an RMT TX channel's symbols into an RX channel, standing in for a wire between two pins (runs the stock `ir_nec_transceiver` example). |
+| `--console <MODE>` | `auto` | Console that stdin/stdout (and `--exit-on`/`--inject-on`) follow. `auto`: UART0 until the firmware selects USB-Serial/JTAG in the ROM console selector (`CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` builds), then EP1 — IDF's default "UART0 + USB-Serial/JTAG secondary" prints once either way. `uart0`: always UART0, EP1 output discarded. `usb-jtag`: EP1 from the first byte — needed for firmware that drives USB-Serial/JTAG outside the IDF console layer (Zephyr, esp-hal, Arduino HWCDC), which never writes the selector. |
 
 ### UART Injection
 
@@ -279,6 +281,43 @@ $ esp-emu --chip esp32p4 --firmware app.bin --psram-size 12M
 Error: esp32p4 cannot report a 12582912-byte PSRAM; its device ID names 4M, 8M, 16M, 32M, 64M (or 0 for none)
 ```
 
+### I2C Devices
+
+The HP I2C controller is modelled on every chip, and the bus has one device
+by default: a 24Cxx-style EEPROM at address 0x50 (an I2C scan under the
+emulator finds it; it is not in your wiring). Everything else NACKs, so
+firmware whose board init talks to an IO expander, touch controller, PMIC or
+sensor fails its first transaction and usually aborts before `app_main`:
+
+```
+E (36) i2c.master: I2C transaction unexpected nack detected
+E (36) tca95xx_16: esp_io_expander_new_i2c_tca95xx_16bit(81): Reset failed
+```
+
+`--i2c-dev` adds a register-file device at an address: it ACKs, stores what
+is written and reads it back, with an auto-incrementing register pointer. That
+is enough for drivers that only need the transaction to succeed. One flag per
+device:
+
+```sh
+# TCA9555 IO expander at 0x20; CST9217 touch at 0x5a (16-bit registers, its
+# ACK byte preloaded); AXP2101 PMIC at 0x34 with its chip ID preloaded.
+esp-emu --chip esp32s3 --firmware app.bin \
+  --i2c-dev 0:0x20 \
+  --i2c-dev 0:0x5a,width=2,fill=0,reg=0xd006=0xab \
+  --i2c-dev 0:0x34,reg=0x03=0x4a
+```
+
+`PORT` is the IDF `i2c_port_t`. `width=2` selects 16-bit (big-endian)
+register addresses. `fill` is what every register reads until written
+(default 0xFF, like a pulled-up, unprogrammed part). `reg=REG=VAL` preloads
+one register — a chip ID the driver checks, a status byte it polls for.
+
+The device has no behaviour beyond read-back: an expander's input port does
+not follow its output latch or the pin level, and a sensor's data registers
+hold whatever was preloaded. Real device models and host-side device bridges
+are tracked separately.
+
 ### Chip Revision (eFuse)
 
 Firmware built with a `CONFIG_<CHIP>_REV_MIN_*` constraint checks the wafer
@@ -294,12 +333,36 @@ esp-emu --chip esp32c3 --firmware build/merged_flash.bin --efuse c3_rev1p1.efuse
 ```
 
 `--chip-rev` takes `MAJOR.MINOR` or ESP-IDF's integer form (`101`). The script
-covers C3, C5, C6, H2, P4 and S31, writes the MAC and calibration defaults the
+covers C3, C5, C6, H2, P4, S3 and S31, writes the MAC and calibration defaults the
 emulator would otherwise seed, and warns past each chip's `REV_MAX_FULL`, where
 the bootloader rejects every image. espefuse over `socket://` cannot do this:
 BLK1 is Reed-Solomon coded and the burn aborts once the seeded revision leaves
 it non-empty. An `--efuse` image that states any wafer field is honoured as
 written; the default is seeded only when all of them read zero.
+
+#### ESP32-P4 images built for rev 0.x / 1.x silicon
+
+The embedded P4 ROM is the eco5 (rev 3.x) ROM, and ESP-IDF links rev 0.x/1.x
+and rev 3.x bootloaders against different ROM layouts. ESP-IDF v5.4, and v5.5
+up to v5.5.2, build for rev 0.x/1.x by default
+(`CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y`); v5.5.3 and later default to rev 3.1.
+Such an image would fault in the 2nd-stage bootloader, so the emulator refuses
+it at startup: `esp32p4 image built for silicon v0.1..v1.99 but the loaded ROM
+serves v3.0..v3.99`.
+
+Either rebuild with `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n`, or run the image on
+the rev0 ROM ELF from IDF's `esp-rom-elfs` tool with an eFuse blob to match:
+
+```sh
+python3 tools/make-efuse.py --chip esp32p4 --chip-rev 1.0 -o p4_rev1p0.efuse
+esp-emu --chip esp32p4 --firmware build/merged_flash.bin \
+  --rom ~/.espressif/tools/esp-rom-elfs/20241011/esp32p4_rev0_rom.elf \
+  --efuse p4_rev1p0.efuse
+```
+
+`--rom` is what lifts the refusal; `--efuse` satisfies the bootloader's own
+revision check (without it the emulator warns and the app is rejected). A
+rev-3 image on the rev0 ROM is refused the same way.
 
 ## WiFi Emulation
 
