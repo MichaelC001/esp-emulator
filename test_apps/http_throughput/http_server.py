@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Local HTTP server that streams a fixed-size payload for emulator throughput
 tests. The guest reaches it at http://192.168.4.1:<PORT>/bigfile — esp-emu's
 user-net redirects the gateway IP to host 127.0.0.1 (slirp-style)."""

@@ -32,6 +32,7 @@ more — a Rust `cdylib` does — and a host ignores what it does not know.
 (func (export "part_register")  (result i32))
 (func (export "part_on_pins")   (param i64 i64))
 (func (export "part_on_bus")    (param i32) (result i32))  ;; only if you claim an I2C address or an SPI chip select
+(func (export "part_on_message") (param i32))        ;; only if you are sent one-way messages (a serial line, a PWM pin)
 (func (export "part_poll")      (param i64) (result i32))
 
 (func (export "part_on_input")  (param i32))
@@ -39,11 +40,11 @@ more — a Rust `cdylib` does — and a host ignores what it does not know.
 (memory (export "memory") 1)
 ```
 
-The first three are plumbing. The next five are the emulator's side. The last
+The first three are plumbing. The next six are the emulator's side. The last
 two are the *person's* side — somebody clicking on the part, and somebody
 looking at it. The emulator has no idea a person exists, so neither reaches it.
 
-All but `part_on_bus` and `part_state` are required. A host checks for every
+All but `part_on_bus`, `part_on_message` and `part_state` are required. A host checks for every
 one when it loads a module, so a missing export is refused by name rather than
 failing as a `TypeError` at its first call.
 
@@ -51,6 +52,21 @@ failing as a `TypeError` at its first call.
 chip select, and a part without it has no bus. A host refuses a part that claims
 one but does not export it, at load, for the same reason: the first transaction
 to it would otherwise wait for an answer that cannot come.
+
+`part_on_message` is needed only by a part that claims something the emulator
+sends one-way messages about: a serial line, or a pin it reads as PWM
+(`GpioClaim.pwm_pins`). A part that claims one but does not export it is
+refused the same way, since what the chip transmits to it, or the waveform
+on its pin, would otherwise go nowhere.
+
+Three kinds of call carry the emulator's side, and a new channel fits one of
+them rather than adding an export: a pin moved (`part_on_pins`), a question
+the chip waits on (`part_on_bus`), or a one-way message the part is told and
+answers, if at all, from `part_poll` (`part_on_message`). A new one-way
+channel is a new `EmulatorMessage` kind, handed over through the same export.
+The part's side is one call: everything a part sends, a `GpioDrive`, a
+`UartRx` or an `AnalogDrive`, comes out of `part_poll`, so a channel the part
+drives adds a message kind and no export.
 
 ### The buffer
 
@@ -65,6 +81,9 @@ handed over, never truncated. A `PartConfig` that does not fit leaves the part
 unregistered, with the reason reported; a bus request that does not fit is one
 the part cannot answer, which fails the part (see [When a call
 fails](#when-a-call-fails)), since the emulator is stopped waiting on it.
+A part on a serial line is sent what the chip transmits at most 128 bytes at a
+time, in a message of up to 147 bytes; a buffer that cannot hold one fails the
+part at the first that does not fit.
 
 There is no `malloc` in this contract. That is on purpose, so a part can be
 written in a language with no runtime.
@@ -78,6 +97,11 @@ handshake   part_on_pins(levels at accept)       once, if the emulator accepts
 run         part_on_pins                         after each pin change
             part_on_bus                          on each transaction to an address
                                                  or chip select this part claims
+            part_on_message  ->  part_poll       on each one-way message addressed
+                                                 to this part: what the chip
+                                                 transmits on its serial line,
+                                                 a change of the waveform on a
+                                                 pin it reads as PWM
             part_poll                            after each pin change and heartbeat
 reset       part_on_pins(levels after reset)     on each chip reset, then part_poll
 person      part_on_input  ->  part_poll         on each interaction (part_poll
@@ -136,9 +160,12 @@ what it answers for until it knows where it is.
 The `Register` carries `proto_version` (send `ProtoVersion.PROTO_VERSION_CURRENT`),
 a `name` for logs, and `claims`: the pins this part drives, the pins it wants
 every transition of (`GpioClaim.watch_pins`; any other pin reaches it as the
-level once a tick), the I2C address it answers for on which pads, and the
-chip-select pad it is selected by on SPI, all of which follow from the
-configuration. A part nobody wired claims nothing.
+level once a tick), the I2C address it answers for on which pads, the
+chip-select pad it is selected by on SPI, the serial line it is the device
+on, and the analog pads it puts a voltage on (`AnalogClaim`), all of which
+follow from the configuration. A part nobody wired claims nothing. An analog
+claim on a pad with no ADC channel is refused, as is every analog claim on a
+chip whose ADC is not modelled (P4, S3).
 
 The host sends it to the emulator as this part's handshake. Returning `0` is an
 error (`part_register returned nothing`). A refusal — a version mismatch, or a
@@ -243,17 +270,74 @@ the guest sees the same timing however long the call took. The emulator then
 holds the answer until the bus would have finished clocking it, at the speed the
 firmware programmed. Do not add that time yourself.
 
+### `part_on_message(len: i32)`
+
+The buffer holds an `EmulatorMessage` addressed to this part alone: a one-way
+message, its `sim_time_ns` the instant it was sent and its payload saying what
+it is about. Nothing comes back, and nothing waits: the guest is not stopped,
+and a part with nothing to say says nothing. A part reads the payload's kind
+and ignores a kind it does not take, as a host ignores an export it does not
+know; a later channel adds kinds, not exports. Two kinds today:
+
+**`UartTx`**: what the chip transmitted on the serial line this part claimed
+(`UartClaim`), in order, as it left the TX FIFO, from the moment the
+firmware's driver put the UART on the claimed pads: what it sent before then
+reached no device, as on a board. The bytes arrive in pieces of at most 128:
+one frame may come in two calls and two frames in one, so a part that reads
+frames keeps what it has until a frame is whole.
+
+To answer, return a `UartRx` from `part_poll`: from the poll right after this
+call to answer at once, or from a later one to answer after the device's own
+delay. A `UartRx` is taken when it arrives, whatever its `sim_time_ns`; the
+emulator does not hold it. Its bytes enter the chip's RX FIFO 128 at a time,
+each next 128 no sooner than their time at the baud rate the firmware
+programmed or 65,536 CPU cycles, whichever is less: a burst lands faster than
+the wire would carry it, but never overruns the FIFO. Nothing in a `UartRx`
+names the port: the emulator takes it from the pads the claim named. Bytes a
+part sends before the firmware's driver has put a UART on those pads go
+nowhere, as on a board.
+
+**`PwmState`**: the period and the high time, in nanoseconds, of what a PWM
+block (LEDC, or an MCPWM generator) now puts on a pin this part named in
+`GpioClaim.pwm_pins`. Sent when it changes, never periodically: a steady
+waveform is one call however long it runs, and the part keeps what it was
+told. As a message it is at most 41 bytes, so any buffer holds it; one that
+did not fit would fail the part, since it is not offered again.
+
+`period_ns` of zero is no waveform: the block stopped or its timer is held,
+the pin carries no PWM signal, or the output is not one pulse a period. The
+pin's level is then in `part_on_pins`. A `high_ns` of zero is a pin held low,
+and equal to `period_ns` one held high, both while the block's timer runs. A
+servo reads `high_ns`, a buzzer `period_ns`, a lamp or a motor driver the two
+together.
+
+The first one comes right after the handshake if the pin carries a waveform
+then, or once it does; a pin nothing ever drove is never reported. After a
+chip reset every pin the part was told about is told again, period zero while
+the firmware boots. Changes closer together than a quantum (1 ms by default)
+come as one message per quantum with the waveform then, so a hardware fade is
+seen in steps of at most a quantum and always ends on its last state. While a
+PWM block toggles the pin, its level in `part_on_pins` stays at what it was
+before the waveform started (or, for a part that attached meanwhile, at the
+sample of it the handshake carried); it is reported once the waveform stops or
+holds a level, whatever it is. A part that needs every edge names the pin in `watch_pins` as
+well.
+
 ### `part_poll(now_ns: i64) -> i32`
 
 How a part speaks without being asked. Write an `EmulatorMessage` into the
 buffer and return its length, or return `0` for nothing to say. A button press
-becomes a `GpioDrive`. `now_ns` is the current emulated time.
+becomes a `GpioDrive`; a potentiometer turned becomes an `AnalogDrive`, the
+millivolts on a pad it claimed, held until the next one and put back after a
+chip reset without the part being asked. `now_ns` is the current emulated
+time.
 
 Called after every pin change, after every `ClockSync` heartbeat (one per
-quantum, 1 ms of emulated time by default), and right after `part_on_input`.
+quantum, 1 ms of emulated time by default), and right after `part_on_message` and
+`part_on_input`.
 
 If the message is stamped with a `sim_time_ns` in the future, the emulator holds
-it and applies it then. Stamp it with `now_ns`, or anything already past, and it
+it and applies it then; a `UartRx` is the exception, taken when it arrives. Stamp it with `now_ns`, or anything already past, and it
 happens as soon as it can. See [Two ways to act at a
 time](#two-ways-to-act-at-a-time-and-when-to-use-each).
 
@@ -390,6 +474,23 @@ to it reboots, and a part is treated the same way:
   or as void, whichever its device would do. A message the part stamped with a
   future time before the reset is dropped, not counted in
   `ClockSync.scheduled_dropped`, and never delivered.
+- Its PWM pins are told again: a `PwmState` with period zero while the
+  firmware boots, then the waveform once its driver runs.
+- Its serial line goes quiet until the firmware's driver runs again. Bytes it
+  had sent that the firmware had not read are gone with the chip's receiver,
+  and bytes it sends before the driver puts a UART back on its pads go
+  nowhere.
+
+## What a part cannot claim yet
+
+An I2S data pad (`I2sClaim`). Audio reaches a consumer as `I2sFormat` and
+`I2sOut` messages and comes back as `I2sIn`, and no export here carries
+them, so both hosts refuse a part whose registration claims one, by name.
+An audio device attaches over a transport that hands it the messages
+themselves (`--cosim-tcp`, or a page on the browser transport).
+
+A DVP camera sensor (`DvpClaim`), for the same reason: its frames are
+`CamFrame` messages and the chip side reaches it as `DvpFormat`.
 
 ## Versioning
 
@@ -399,9 +500,9 @@ because they move for different reasons.
 - **`part_abi_version()`** is the shape above, **version 1**. It changes when a
   *required* function is added or removed, or when one of them starts meaning
   something narrower. An *optional* export — one a host looks for before
-  calling, rather than assuming: `part_on_bus`, `part_state` — moves nothing,
-  so a module built before it existed is still called exactly the way it
-  expects.
+  calling, rather than assuming: `part_on_bus`, `part_on_message`, `part_state` —
+  moves nothing, so a module built before it existed is still called exactly
+  the way it expects.
 - **`Register.proto_version`** is the message contract. It is checked by the
   same handshake any consumer goes through, and refused the same way.
 

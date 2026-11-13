@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * 32 MiB flash smoke app for esp-emu (GH #8).
  *
  * A separate project rather than a case inside test_apps/smoke because the

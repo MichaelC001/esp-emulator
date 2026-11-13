@@ -26,9 +26,9 @@ SDIO/SPI/UART. ESP-EMU emulates the SDIO transport between the two MCUs:
 The bridge carries framed CMD52 / CMD53 / INT_RAISE messages. CMD52
 exchanges run inline; CMD53 chains are walked through guest IDMAC
 descriptors so DMA scatter-gather works exactly as on real silicon. DAT1
-(the SDIO IO interrupt line) is mirrored to GPIO 15 on the host so
-IDF's `gpio_get_level()` fast-path drains queued packets without a
-syscall.
+(the SDIO IO interrupt line) is mirrored onto the pad the firmware routes
+to slot 1's DATA1 input (GPIO 15 on the P4 Function EV Board) so IDF's
+`gpio_get_level()` fast-path drains queued packets without a syscall.
 
 ## Prerequisites
 

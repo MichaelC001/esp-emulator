@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * esp-emu smoke app — the cross-chip regression gate.
  *
  * Each test is a `bool test_<name>(void)` in a topic file next to this one;
@@ -95,6 +101,9 @@ void app_main(void)
 #endif
 #if SOC_I2C_SUPPORTED
     RUN_TEST("i2c",                    test_i2c);
+#endif
+#if SOC_I2S_SUPPORTED
+    RUN_TEST("i2s",                    test_i2s);
 #endif
     RUN_TEST("freertos_task",          test_freertos_task);
     RUN_TEST("freertos_semaphore",     test_freertos_semaphore);

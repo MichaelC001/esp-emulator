@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Serve the summary views for an esp-emu execution trace.
 
     esp-emu --chip esp32c6 --firmware app.bin --elf app.elf --trace run.json

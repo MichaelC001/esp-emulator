@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Load, run and hash one PIE case (pie.h). The random parts of a case's state
  * come from its seed here rather than from the generated table, which keeps
  * the table small enough to commit.

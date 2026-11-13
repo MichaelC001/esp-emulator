@@ -21,8 +21,11 @@ emulator, or write your own in Rust or any language that compiles to
 WebAssembly. The firmware never knows the component is virtual: it uses the
 stock ESP-IDF drivers unchanged.
 
-**What works today:** parts that read and drive GPIO pins, I2C devices and SPI
-devices. Other signals, such as UART, are planned.
+**What works today:** parts that read and drive GPIO pins, I2C devices, SPI
+devices, serial (UART) devices, parts that read a pin as PWM, such as a servo,
+and analog sources, a voltage on an ADC pad. A part that drives pins also
+clocks the chip's pulse counter (PCNT), so a rotary encoder needs nothing
+more.
 
 | Example | What it is | Where |
 |---|---|---|
@@ -30,6 +33,11 @@ devices. Other signals, such as UART, are planned.
 | SHT31 | a temperature and humidity sensor on I2C | [part](../../examples/parts/sht31), [board](../../examples/boards/sensor/README.md) |
 | TMP123 | a temperature sensor on SPI | [part](../../examples/parts/tmp123), [board](../../examples/boards/thermometer/README.md) |
 | 93C46 EEPROM | an SPI EEPROM whose chip select the firmware drives as a GPIO | [part](../../examples/parts/eeprom93c46), [board](../../examples/boards/eeprom/README.md) |
+| MH-Z19B | a CO₂ sensor on a UART | [part](../../examples/parts/mhz19b), [board](../../examples/boards/co2/README.md) |
+| KY-040 | a rotary encoder with a push switch, counted by the chip's PCNT | [part](../../examples/parts/ky040), [board](../../examples/boards/encoder/README.md) |
+| SG90 | a hobby servo read as PWM, from LEDC or MCPWM | [part](../../examples/parts/sg90), [board](../../examples/boards/servo/README.md) |
+| Potentiometer | a knob's wiper on an ADC pad | [part](../../examples/parts/potentiometer), [board](../../examples/boards/analog/README.md) |
+| NTC thermistor | a thermistor divider on an ADC pad | [part](../../examples/parts/ntc_thermistor), [board](../../examples/boards/analog/README.md) |
 
 More parts will come from **esp-virtual-parts**, a separate project that will
 publish one `.wasm` file per component, plus an `index.json` listing each
@@ -41,8 +49,10 @@ Download two files from the
 [latest release](https://github.com/espressif/esp-emulator/releases/latest):
 the emulator for your computer, `esp-emu-<version>-<platform>.tar.gz`, and the
 examples kit, `esp-emu-<version>-examples.tar.gz`. Unpack both. The kit has a
-`button/`, a `sensor/` and a `thermometer/` folder. Each holds a board file,
-the part and ESP32-C3 firmware, ready to run.
+`button/`, a `sensor/`, a `thermometer/`, a `co2/`, an `encoder/`, a
+`servo/` and an `analog/` folder. Each holds a board file, the parts and the
+firmware, ready to run: ESP32-C3 firmware, and ESP32-C6 for the encoder, since
+the C3 has no pulse counter.
 
 In the kit's `button/` folder:
 
@@ -63,19 +73,32 @@ part button input release
 The firmware prints `BUTTON: pressed`, then `BUTTON: released`, from its own
 GPIO interrupt handler. The [button board README](../../examples/boards/button/README.md)
 walks through this in more detail. The sensor and thermometer boards work the
-same way, with `warmer` and `cooler` instead of `press` and `release`.
+same way, with `warmer` and `cooler` instead of `press` and `release`, the
+CO₂ board with `more` and `less`, the encoder board with `cw` and `ccw`, one
+detent each, and the analog board's knob with `more` and `less`. The servo
+board needs nothing typed: the firmware turns the servo, and `part servo
+state` says where its horn is.
 
 ### In the browser
 
-The same button and sensor run in a web page, with nothing to install:
+The same button, sensor, CO₂ sensor, servo and knob run in a web page, with
+nothing to install:
 
 - <https://espressif.github.io/esp-emulator/button-demo.html>
 - <https://espressif.github.io/esp-emulator/sensor-demo.html>
+- <https://espressif.github.io/esp-emulator/co2-demo.html>
+- <https://espressif.github.io/esp-emulator/encoder-demo.html>
+- <https://espressif.github.io/esp-emulator/servo-demo.html>
+- <https://espressif.github.io/esp-emulator/adc-demo.html>
 
 Everything runs in your browser. Nothing is uploaded. The log shows the part
 attaching, then the firmware's output. Click **Press** and the firmware prints
 `BUTTON: pressed`. On the sensor page, **Warmer**, **Cooler**, **Wetter** and
-**Drier** change what the part measures, and the next reading follows.
+**Drier** change what the part measures, and the next reading follows; on the
+CO₂ page, **More CO₂** and **Less CO₂**. On the encoder page, **Turn right**
+and **Turn left** move the knob one detent, and the firmware's count moves by
+four. The servo page draws the horn as the firmware turns it. On the knob
+page, **Turn up** and **Turn down**.
 
 To run the pages locally, download `esp-emu-<version>-wasm.tar.gz` from the
 release, unpack it, and serve its `www/` folder with the server that comes in
@@ -88,10 +111,13 @@ python3 serve.py 8080
 ```
 
 `www/` holds the demo firmware and parts as `_button_fw.bin`,
-`pushbutton.wasm`, `_sensor_fw.bin` and `sht31.wasm`. Replace them to run your
-own; with either file of a demo missing, its page asks for both. `serve.py` tells the browser not to cache, so a part you rebuild and copy
-in is the one the next reload runs. The demo pages only know the push button
-and the SHT31. Any other part runs in
+`pushbutton.wasm`, `_sensor_fw.bin`, `sht31.wasm`, `_co2_fw.bin`,
+`mhz19b.wasm`, `_encoder_fw.bin`, `ky040.wasm`, `_servo_fw.bin`, `sg90.wasm`,
+`_adc_fw.bin` and `potentiometer.wasm`. Replace them to run your own; with
+either file of a demo missing, its page asks for both. `serve.py` tells the
+browser not to cache, so a part you rebuild and copy in is the one the next
+reload runs. The demo pages only know the push button, the SHT31, the MH-Z19B,
+the KY-040, the SG90 and the potentiometer. Any other part runs in
 [a page of your own](#use-parts-in-your-own-page).
 
 ## Run parts in the command-line emulator
@@ -188,6 +214,87 @@ level while the transfer is clocked: low, unless the part says
 a part, and the [EEPROM board](../../examples/boards/eeprom/README.md) runs
 ESP-IDF's `hd_eeprom` example against it unchanged.
 
+### Wire a serial part
+
+A serial part is wired by its own `TX` and `RX` pins, as its module labels
+them. The sensor's `TX` goes to the GPIO the firmware gives its UART's RX,
+and the sensor's `RX` to the UART's TX:
+
+```json
+"co2": { "module": "mhz19b.wasm", "pins": { "TX": 5, "RX": 4 } }
+```
+
+You do not say which UART that is. The emulator works it out when the
+driver's `uart_set_pin` runs, through the GPIO matrix or the UART's own pads.
+The log then says `is the serial device on GPIO 4/5 (TX/RX from the chip's
+end)`: the claim names the pads the way the chip sees them.
+
+The part gets every byte the firmware transmits on that UART, in pieces of up
+to 128 bytes, and what it sends back lands in the UART's receive FIFO, 128
+bytes at a time, paced by the baud rate the firmware set. Nothing waits: the
+firmware is never stopped for the part, and a part that does not answer is a
+device that says nothing, which the firmware sees as its own read timeout.
+
+UART0 and UART1 are modelled, on every chip. UART0 is usually the console,
+and a part is not wired to the console's UART: the emulator's own output and
+input use it. If the firmware's console is on USB-Serial/JTAG
+(`--console usb-jtag`, or the firmware selects it) or on a USB CDC-ACM port
+(`--console usb-cdc`), UART0 is free for a part, from the moment the console
+moves. A UART that `--uart-tcp` or `--uart1-tcp` bridges to a socket is not a
+part's either. In both cases the emulator says so once, and wires the part as
+soon as the UART is free.
+
+### Wire a PWM part
+
+A part that reads a pin as PWM, such as a servo, a buzzer, a dimmed LED or a
+motor driver, is wired by its signal pin:
+
+```json
+"servo": { "module": "sg90.wasm", "pins": { "SIG": 4 } }
+```
+
+The log says `reads GPIO 4 as PWM`. Whichever block the firmware puts on the
+pin, LEDC (`ledc_channel_config`) or an MCPWM generator
+(`mcpwm_new_generator`), the part is told the period and the high time on it,
+in nanoseconds, whenever they change, and not otherwise: a steady waveform is
+one message however long it runs. A hardware fade reaches it step by step,
+with no register write, at most one step each millisecond of emulated time and
+always the last one. A period of zero means no waveform: the channel stopped,
+its timer is held, or the pin carries something else.
+
+Several parts may read one pin. While a PWM block toggles a pin some part reads
+this way, the pin's level is not reported to the parts once a tick (it would
+only sample the waveform); a part that wants every edge as well also watches
+the pin. An MCPWM generator that goes high more than once a period is not one
+waveform and is reported as none; its edges are still there for a watcher.
+
+### Wire an analog part
+
+An analog part is wired by its output pin, the pad it puts a voltage on:
+
+```json
+"knob": { "module": "potentiometer.wasm", "pins": { "W": 3 } }
+```
+
+The pad must be an ADC pad of the chip, one its `adc_channel.h` gives a
+channel: GPIO 0-5 on the C3, 1-6 on the C5, 0-6 on the C6, 1-5 on the H2,
+42-57 on the S31. Any other pad is refused when the board loads, and so is
+every analog part on the P4 and the S3, whose ADC the emulator does not model
+yet. One source per pad: a pad another part drives, as a GPIO or as an analog
+source, is refused.
+
+The log then says `puts a voltage on GPIO 3`. The part sends millivolts, not
+counts. The firmware's conversion reads them at
+whatever attenuation it chose, so the same part works at 0 dB and at 12 dB.
+On the C3, C5, C6 and H2 the code follows the chip's own ADC calibration point,
+so `adc_cali_raw_to_voltage` gives the part's voltage back, less the
+scheme's own curve correction: a few millivolts on the C5, C6 and H2, about
+1% at 2000 mV on the C3 at 12 dB. The H2's emulated eFuse carries no
+calibration, so there the firmware reads raw codes only. On the S31 the code is the one its line-fitting scheme reads,
+±2000 mV around 0 V. A voltage holds until the part sends another, across a
+chip reset, and stays when the part goes; above the 3300 mV supply it is
+taken as 3300.
+
 ### Built-in devices and wires
 
 The board file can also place the emulator's own simple device models and
@@ -269,8 +376,9 @@ told about the reset and the pin levels it left.
 
 **At exit** the emulator reports how long the parts took, any part that
 failed, and any wiring the firmware never used: an I2C part whose pads never
-got a bus, or an SPI part whose chip-select pad never got a chip select, with
-the pads the firmware did use. It also reports the worst delay of any
+got a bus, an SPI part whose chip-select pad never got a chip select, or a
+serial part whose pads never got a UART line, with the pads the firmware did
+use. It also reports the worst delay of any
 scheduled input over the run.
 
 ### Record what crossed the boundary
@@ -295,6 +403,10 @@ The kinds you will see:
 | `GpioDrive` | a part drove a pin. Not echoed back to the part |
 | `BusRequest` | an I2C transaction (`write` is the bytes sent, `read_len` how many are read back) or an SPI transfer (`tx` the data written, `rx_len` how many bytes are read back, then the framing: command and address phases, line widths, and the pad on each data line) |
 | `BusReply` | the part's answer. An SPI write has no answer |
+| `UartTx` | bytes the firmware transmitted on a part's UART (`port`, `data`), up to 128 a message |
+| `UartRx` | bytes a serial part sent the firmware |
+| `PwmState` | the waveform on a pin a part reads as PWM (`pin`, `period_ns`, `high_ns`), when it changes |
+| `AnalogDrive` | the voltage an analog part holds on a pad (`pin`, `millivolts`) |
 | `Register`, `RegisterAck` | the part attaching, and the emulator accepting it |
 | `ChipReset` | the chip was reset |
 | `ClockSync` | the heartbeat, once per millisecond. Left out unless `--cosim-log-filter` names it |
@@ -407,8 +519,27 @@ rustup target add wasm32-unknown-unknown
   its claim, and may say `cs_active_high`.
   [`examples/parts/eeprom93c46`](../../examples/parts/eeprom93c46) is one. It
   also drives a pin back, its busy signal, timed on the emulated clock.
+- **A serial device** claims its line with `serial(tx, rx)`, by its own TX and
+  RX pins, sets `ON_MESSAGE = true`, takes what the chip sends in `on_uart`, and
+  answers from `poll` with `transmit(bytes, now)`. The bytes come in pieces: a
+  command may arrive over two calls, so collect them until it is whole.
+  [`examples/parts/mhz19b`](../../examples/parts/mhz19b) is a complete serial
+  part.
+- **A part read as PWM** claims its pin with `reads_pwm(pins)`, sets
+  `ON_MESSAGE = true`, and takes the period and high time in `on_pwm`. It is
+  told only on a change, so it keeps what it was told; a period of 0 is no
+  waveform, and the pin's level is then the one `on_pins` reports.
+  [`examples/parts/sg90`](../../examples/parts/sg90) is a complete PWM part.
 
-All four examples show what they are set to through `state`, so
+- **An analog source** claims its pad with `analog(pin)` and, from `poll`,
+  holds a voltage there with `hold(pin, millivolts, now)` when it changes. It
+  needs no handler: the chip reads the pad when the firmware converts.
+  [`examples/parts/potentiometer`](../../examples/parts/potentiometer) is a
+  complete analog part, and
+  [`examples/parts/ntc_thermistor`](../../examples/parts/ntc_thermistor) one
+  with a model behind its voltage.
+
+All nine examples show what they are set to through `state`, so
 `part NAME state` and a web page can read it.
 
 ### Time inside a part
@@ -420,6 +551,27 @@ in the part's own state and act when a later `poll` sees the clock pass it.
 That lands within one heartbeat, a millisecond.
 [`PART_ABI.md`](../../proto/PART_ABI.md#two-ways-to-act-at-a-time-and-when-to-use-each)
 shows the code and explains the second, finer-grained way.
+
+A part says one thing each time it is polled, so a part that puts edges on a
+pin, such as the [KY-040](../../examples/parts/ky040), puts one edge a poll.
+It is polled on each heartbeat: once a millisecond while the chip runs, and
+once per sleep while the chip waits for its next tick. With ESP-IDF's
+default 100 Hz tick and a firmware that mostly sleeps, a turn queued ahead
+put its edges on the pins 2.5 ms apart on P4 and up to 10 ms apart on H2:
+25 to 100 detents a second, more than a hand turns. The part queues what it
+owes, so a quick run of turns plays out a little slower than it was clicked
+and loses nothing.
+
+One edge a poll is the limit for any part that makes edges. A part asked for
+more, such as a flow sensor pulsing faster than it is polled, falls behind:
+the edges it owes wait in the part and land late, for as long as the rate
+stays above the limit. A count still comes out right, later than on a real
+board, but a rate the firmware measures from edge times reads low.
+Stamping edges ahead does not lift the limit, since each still takes a poll;
+and the emulator holds at most 4096 events stamped ahead, for all parts
+together, refusing the rest and counting them in `ClockSync.scheduled_dropped`.
+Handing over a timed train of edges in one poll is planned, with the pulse
+signals, and lifts the limit.
 
 While a part answers an I2C transaction or an SPI read, the chip runs no
 instructions. The firmware sees the answer after the time the bus takes to
@@ -519,7 +671,7 @@ I2C address on the same pads, or sit on the same chip-select pad.
 
 | Direction | Message | Meaning |
 |---|---|---|
-| page → worker | `{ type: "start", port, module, config }` | Load the part. `port` is the worker's end of the part's `MessageChannel` (transfer it); `module` is the `.wasm` URL or its bytes as an `ArrayBuffer`; `config` is `{ pins: { NAME: gpio }, addr }`, with `addr` only for an I2C part that takes one. An SPI part is wired by its pins alone. |
+| page → worker | `{ type: "start", port, module, config }` | Load the part. `port` is the worker's end of the part's `MessageChannel` (transfer it); `module` is the `.wasm` URL or its bytes as an `ArrayBuffer`; `config` is `{ pins: { NAME: gpio }, addr }`, with `addr` only for an I2C part that takes one. An SPI or serial part is wired by its pins alone. |
 | page → worker | `{ type: "input", kind }` | Somebody interacted with the part: `kind` is the interaction's name, such as `"press"`. |
 | page → worker | `{ type: "state" }` | Somebody is looking at the part: ask what it shows. |
 | worker → page | `{ type: "state", values }` | What the part shows, as `{ name: "value" }` in the part's own words, or `null` for a part that shows nothing. |
@@ -557,6 +709,18 @@ for an older emulator keeps working as long as neither number moved.
 | `pin A is GPIO N, beyond this chip's M pins` | the board file wires a pin this chip does not have (command-line emulator) |
 | `part claims an I2C address but exports no part_on_bus` | an I2C part built without its bus handler |
 | `part claims an SPI chip select but exports no part_on_bus` | the same, for an SPI part |
+| `claims the serial line on GPIO T/R but exports no part_on_message` | a serial part built without its `part_on_message` export; a part made with `esp-part` always has one |
+| `reads GPIO N as PWM but exports no part_on_message` | a PWM part built without its `part_on_message` export; a part made with `esp-part` always has one |
+| `a PWM state for GPIO N to NAME was refused; it is sent again ...` | the link to the part was full; the waveform is sent again a millisecond later. Logged at the first and then at each doubling of the count |
+| `refused: a UART claim has no tx_pin ...` | the serial part is wired without its `TX` or `RX`; pin names are case-sensitive |
+| `refused: GPIO N is already on another model's serial line ...` | two serial parts are wired to one pin |
+| `UART0 is the console, so NAME on GPIO T/R is not wired to it while it is` | the firmware put the part's pins on the console's UART; it is wired once the console moves to USB, or never |
+| `UART1 is a host bridge's (--uart-tcp, --uart1-tcp), so ...` | a socket bridge holds that UART; drop the bridge or move the part |
+| `refused: GPIO N has no ADC channel on this chip` | an analog part wired to a pad no ADC channel is bonded to |
+| `refused: GPIO N cannot take an analog claim: this chip's ADC is not modelled` | an analog part on the P4 or the S3 |
+| `refused: GPIO N is already driven by another model — one source per analog pad` | an analog part on a pad another part drives |
+| `ignoring a voltage on GPIO N from NAME — it claims no analog pad there` | the part sent an `AnalogDrive` for a pad it did not claim |
+| `GPIO N driven to M mV, above the pad's 3300 mV supply: taken as 3300` | an analog part's voltage is above the supply |
 | `refused: an SPI claim names no chip select (cs_pin) ...` | the SPI part is wired without its `CS`; pin names are case-sensitive |
 | `refused: SPI chip select GPIO N is already claimed ...` | two parts are wired to one chip-select pad |
 | `a part did not answer within 5 s: an SPI read on bus B CS S, from NAME` | the part failed while answering a read, as for I2C below, with `BUS_OP_SPI` |

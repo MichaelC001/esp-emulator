@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * ESP32-S3 TIE (`ee.*`) single-instruction cases: the state a case loads
  * before its instruction and stores after it, the case table that
  * tools/internal/pie/silicon/gen_s3.py emits, and the runner. How test_ee.c

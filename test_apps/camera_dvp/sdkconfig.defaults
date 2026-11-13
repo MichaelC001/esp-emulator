@@ -1,0 +1,4 @@
+CONFIG_ESP_TASK_WDT_EN=n
+# The frame buffer lives in external RAM; see camera_dvp_main.c.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MEMTEST=n

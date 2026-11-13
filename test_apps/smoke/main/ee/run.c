@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Load, run and hash one ESP32-S3 TIE case (ee.h). Exceptions inside a case
  * are caught with xt_set_exception_handler, which steps over the instruction
  * so the case's epilogue stores the state as the fault left it.

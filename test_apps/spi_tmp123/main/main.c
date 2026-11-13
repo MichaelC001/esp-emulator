@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 /* A TI TMP121/TMP123 read through the stock esp_driver_spi, on every GPSPI bus.
  *
  * The firmware side of the co-simulation SPI channel: a part is the sensor, and

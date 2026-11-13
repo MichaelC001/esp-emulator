@@ -1,0 +1,3 @@
+{ "parts": {
+    "encoder": { "module": "ky040.wasm", "pins": { "CLK": 5, "DT": 6, "SW": 7 } }
+} }

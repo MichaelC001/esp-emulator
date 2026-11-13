@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 /* A button on GPIO 9, read through a real interrupt.
  *
  * Deliberately the smallest firmware that proves the inbound half of the

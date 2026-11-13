@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """Bumble Classic BT peer for esp-emu: serves a virtual controller to the
 emulator on tcp-server:_:9544, then a second Bumble device on the same link
 connects to the firmware over BR/EDR and drives one profile:

@@ -1,0 +1,3 @@
+{ "parts": {
+    "servo": { "module": "sg90.wasm", "pins": { "SIG": 4 } }
+} }

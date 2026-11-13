@@ -91,10 +91,12 @@ test harness in any language. It serves the co-simulation bus of
 `proto/esp_cosim.proto` on a socket, and each connection is one device.
 
 A connected device does everything a part does. It registers with its claims:
-the pins it drives, the pins it wants every transition of, and the I2C
-address or SPI chip select it answers. It then hears each watched pin at
-every transition and every other pin once a tick, plus the heartbeat. It
-drives pins at a named emulated time and answers bus transactions. When it
+the pins it drives, the pins it wants every transition of, the I2C address
+or SPI chip select it answers, the I2S data pads it is the audio device
+on, and the pads it is the camera sensor on. It then hears each watched pin at every transition and every other pin
+once a tick, plus the heartbeat. It drives pins at a named emulated time,
+answers bus transactions, exchanges audio with an I2S unit, and sends frames
+to the camera receiver. When it
 disconnects its claims are released, as for a device unplugged, and a level
 it drove stays on the pin until something else drives it.
 
@@ -140,6 +142,91 @@ A write completes as the firmware clocks it, so the panel never holds the
 chip up; a read parks the firmware until the script answers. Together with
 `--i2c-dev` for the board's expander and codecs, this is enough to watch a
 product firmware's LVGL screen come up.
+
+`tools/cosim-tcp-i2c.py` is an I2C board: a PCA9548A mux at 0x70, a PCF8575
+expander at 0x20 holding the sensors' XSHUT lines, and a VL53L0X at 0x29
+behind each of the eight mux channels. One script claims the three addresses
+and routes 0x29 to the sensor on the channel the mux selects, so eight devices
+share one address the way they do on the wire; a sensor whose XSHUT bit is
+low NACKs, and `--absent N` leaves channel N's sensor off the board:
+
+```sh
+python3 tools/cosim-tcp-i2c.py 5593 --scl 7 --sda 6 &
+esp-emu --chip esp32c3 --firmware build/merged_flash.bin --cosim-tcp 127.0.0.1:5593
+```
+
+`tools/cosim-tcp-i2s.py` is an audio codec's sample path: a speaker on the
+pad the chip transmits on, recording what the firmware plays to a WAV file,
+and a microphone on the pad it receives on, playing it a 440 Hz tone. The
+pads are the firmware's `dout` and `din`; name either or both:
+
+```sh
+esp-emu --chip esp32s31 --firmware build/merged_flash.bin --cosim-tcp 127.0.0.1:5594 &
+python3 tools/cosim-tcp-i2s.py 5594 --dout 52 --din 40 --wav played.wav
+```
+
+An audio device is told each direction's sample rate, slots and width when
+the firmware has programmed them (`i2s_format(payload)`), receives what the
+unit transmits as it is clocked out (`i2s_out(payload)`), and supplies the
+receiver with `i2s_in(pcm)` in the layout it was told, as emulated time
+passes: the script keeps 50 ms queued ahead of the heartbeat's time. A
+receiver left short takes silence after 20 ms rather than blocking the
+firmware. The emulator puts no BCK, WS or MCLK on pads, so the format message
+is all a device learns of the clock. A codec's control port is an I2C device
+like any other, in the same registration. A `.wasm` part cannot claim I2S
+yet; `--i2s-wav` and `--i2s-wav-in` do the same job from files, without a
+device.
+
+`tools/cosim-tcp-camera.py` is a DVP camera sensor on ESP32-S3, ESP32-P4 or
+ESP32-S31: it answers the sensor's SCCB probe on the I2C pads and sends
+frames to the chip's camera receiver, which the stock `esp_driver_cam` DVP
+controller (and `esp_video` on top of it) then delivers. The pads are the
+firmware's `esp_cam_ctlr_dvp_pin_config_t` and its SCCB bus:
+
+```sh
+esp-emu --chip esp32s31 --firmware build/merged_flash.bin --cosim-tcp 127.0.0.1:5594 &
+python3 tools/cosim-tcp-camera.py 5594 --pclk 54 --vsync 56 --de 57 --xclk 55 \
+    --data 46,47,48,49,50,51,52,53 --scl 1 --sda 0 --sensor ov2640 \
+    --fourcc YUYV --size 640x480 --fps 6
+```
+
+Those are the pads and the format of IDF's own `esp_driver_cam` test on
+ESP32-S31 (`test_apps/dvp`, its OV2640 case), which passes against it.
+
+`--frames` is a JPEG file or a directory of them, sent in name order and
+repeated; without it the sensor sends moving colour bars in `--fourcc` at
+`--size`, at `--fps` frames a second of emulated time. `--sensor` picks whose
+identity registers answer the driver's probe (OV2640, OV3640, OV5640; `--reg`
+and `--addr` for another). What the firmware then programs over SCCB is
+acknowledged and read back, not interpreted, so give the script the format
+and size the firmware asks its sensor for: a raw frame of another size is
+refused, since the camera driver could not tell.
+
+A sensor is on the receiver's bus once the firmware routes the receiver's
+pixel clock to the claimed pad. It is told what the chip side looks like
+(`dvp_format(payload)`: whether the receiver is capturing, the XCLK the
+firmware routed out to it, the polarities) and sends each frame with
+`cam_frame(data, width, height, fourcc, due_ns)`, in pieces the transport
+takes. The emulator moves whole frames, not pixel-clock edges: nothing is
+driven on the PCLK, VSYNC, DE or data pads. A frame sent while the receiver
+is stopped is lost, as on the wire, and so is one sent for a capture session
+that has since ended: the format message numbers the sessions, and a frame
+carries the number its sensor last heard. The emulator is not held to the wall
+clock, so the script keeps two frames queued ahead of emulated time; firmware
+that counts frames per second sees the sensor's rate only from a device that
+does the same. A `.wasm` part cannot claim a sensor yet, and there is no
+command-line flag that feeds frames: a sensor is a device with a control bus,
+a format the firmware programs and a cadence of its own, which is what a
+consumer on this bus is.
+
+Start a script before the emulator when the firmware talks to the device at
+boot: the emulator does not wait for a consumer, and `connect` retries for a
+few seconds. An I2C device of your own is the same loop on the helpers in
+`cosim_tcp.py`: `i2c_claim(addr, scl, sda)` in a `register` (several claims
+make one consumer a board), `i2c_request(payload)` for each transaction as
+the firmware clocked it (its write bytes, the length it reads back, and
+whether it continues a read the controller split), and `i2c_reply(id, data)`
+or `i2c_reply(id, ack=False)` for a NACK.
 
 ## Execution Tracing and Profiling
 

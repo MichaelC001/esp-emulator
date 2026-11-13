@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+#
+# SPDX-License-Identifier: Apache-2.0
+
 # Build test_apps/smoke for each chip and run it in esp-emu.
 #
 # A standalone counterpart of tests/idf/test_app_smoke.rs for places without the

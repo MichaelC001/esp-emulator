@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * ESP32-S3 TIE (`ee.*`): a few cases per instruction, each checked against
  * what silicon produced. With sdkconfig.ee_full, the full case set instead,
  * printed for the board-vs-emulator differential test.

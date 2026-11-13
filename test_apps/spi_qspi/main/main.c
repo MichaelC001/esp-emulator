@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 /* Quad-SPI writes the way real firmware makes them, with the stock drivers.
  *
  * The firmware side of the co-simulation SPI channel's framing. Two devices on

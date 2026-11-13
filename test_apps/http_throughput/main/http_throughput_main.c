@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * HTTP throughput benchmark for esp-emu.
  *
  * Brings up the NIC (WiFi STA on C3/C6, internal EMAC on P4/S31), downloads a

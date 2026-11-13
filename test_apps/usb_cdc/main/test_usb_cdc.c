@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * TinyUSB CDC-ACM console on every USB-OTG port the chip has.
  *
  * Boot logs go to UART0. For each port, tinyusb_console_init() moves stdio to

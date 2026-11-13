@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * esp-emu WPA3 station test_app.
  *
  * Connects to the soft AP with each SAE variant the ESP-IDF supplicant

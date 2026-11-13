@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * PIE single-instruction cases (ESP32-P4, ESP32-S31): the state a case loads
  * before its instruction and stores after it, the case table that
  * tools/internal/pie/silicon/gen.py emits, and the runner. How test_pie.c

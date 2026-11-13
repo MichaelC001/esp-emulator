@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """A device on the co-simulation bus over --cosim-tcp, with no protobuf library.
 
 Registers as the model driving GPIO 9, waits for a heartbeat, and presses the

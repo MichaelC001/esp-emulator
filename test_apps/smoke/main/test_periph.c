@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Console output, GPIO and RMT.
  */
 #include "test_smoke.h"
@@ -439,6 +445,95 @@ fail:
     return false;
 }
 #endif /* SOC_I2C_SUPPORTED */
+
+/* --------------- I2S standard mode, duplex --------------- */
+
+#if SOC_I2S_SUPPORTED
+/* I2S0 in standard mode, 16 kHz stereo 16-bit, the data output and input on
+ * one pad so the receiver hears the transmitter. Moves half a second of a
+ * ramp through the stock driver and checks three things: every write and
+ * read completes (the GDMA rings move), the ramp comes back unbroken, and
+ * the half second took about half a second (the clock the driver programmed
+ * paces the stream). */
+bool test_i2s(void)
+{
+    const char *TN = "i2s";
+    enum { CHUNK = 2000, CHUNKS = 16, STEP = 137, BYTE_RATE = 16000 * 4 };
+    static int16_t tx_buf[CHUNK / 2], rx_buf[CHUNK / 2];
+    i2s_chan_handle_t tx = NULL, rx = NULL;
+    esp_err_t err;
+
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    chan_cfg.auto_clear = true;
+    err = i2s_new_channel(&chan_cfg, &tx, &rx);
+    if (err != ESP_OK) {
+        FAIL_MSG(TN, "i2s_new_channel: %s", esp_err_to_name(err));
+        return false;
+    }
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000),
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .gpio_cfg = { .mclk = I2S_GPIO_UNUSED, .bclk = 4, .ws = 5, .dout = 6, .din = 6 },
+    };
+    if ((err = i2s_channel_init_std_mode(tx, &std_cfg)) != ESP_OK ||
+        (err = i2s_channel_init_std_mode(rx, &std_cfg)) != ESP_OK ||
+        (err = i2s_channel_enable(tx)) != ESP_OK ||
+        (err = i2s_channel_enable(rx)) != ESP_OK) {
+        FAIL_MSG(TN, "bring-up: %s", esp_err_to_name(err));
+        goto fail;
+    }
+
+    int16_t next = 0, last = 0;
+    int run = 0, best = 0;
+    int64_t t0 = esp_timer_get_time();
+    for (int c = 0; c < CHUNKS; c++) {
+        size_t n = 0;
+        for (int i = 0; i < CHUNK / 2; i++) {
+            tx_buf[i] = next;
+            next += STEP;
+        }
+        err = i2s_channel_write(tx, tx_buf, CHUNK, &n, pdMS_TO_TICKS(1000));
+        if (err != ESP_OK || n != CHUNK) {
+            FAIL_MSG(TN, "write %d: %s, %u bytes", c, esp_err_to_name(err), (unsigned)n);
+            goto fail;
+        }
+        err = i2s_channel_read(rx, rx_buf, CHUNK, &n, pdMS_TO_TICKS(1000));
+        if (err != ESP_OK || n != CHUNK) {
+            FAIL_MSG(TN, "read %d: %s, %u bytes", c, esp_err_to_name(err), (unsigned)n);
+            goto fail;
+        }
+        /* The longest stretch of the ramp, across chunk boundaries. */
+        for (int i = 0; i < CHUNK / 2; i++) {
+            run = ((int16_t)(rx_buf[i] - last) == STEP) ? run + 1 : 0;
+            best = run > best ? run : best;
+            last = rx_buf[i];
+        }
+    }
+    int ms = (int)((esp_timer_get_time() - t0) / 1000);
+    int want_ms = CHUNK * CHUNKS * 1000 / BYTE_RATE;
+    if (best < CHUNK) {
+        FAIL_MSG(TN, "longest unbroken ramp read back is %d samples", best);
+        goto fail;
+    }
+    if (ms < want_ms * 7 / 10 || ms > want_ms * 15 / 10) {
+        FAIL_MSG(TN, "%d bytes at 16 kHz took %d ms, want about %d", CHUNK * CHUNKS, ms, want_ms);
+        goto fail;
+    }
+
+    i2s_channel_disable(tx);
+    i2s_channel_disable(rx);
+    i2s_del_channel(tx);
+    i2s_del_channel(rx);
+    return true;
+
+fail:
+    i2s_channel_disable(tx);
+    i2s_channel_disable(rx);
+    i2s_del_channel(tx);
+    i2s_del_channel(rx);
+    return false;
+}
+#endif /* SOC_I2S_SUPPORTED */
 
 /* --------------- SPI master on the IO MUX fast path --------------- */
 

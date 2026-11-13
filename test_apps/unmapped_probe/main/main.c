@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * unmapped_probe — what an ESP32-S3 core does on a load/store to memory that
  * is not there, or that the access width cannot reach.
  *

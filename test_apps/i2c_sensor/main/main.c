@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 /* An SHT31 read through the stock esp_driver_i2c, on every HP I2C port.
  *
  * The firmware side of the co-simulation I2C channel: a part answers for the

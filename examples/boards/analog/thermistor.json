@@ -1,0 +1,3 @@
+{ "parts": {
+    "ntc": { "module": "ntc_thermistor.wasm", "pins": { "OUT": 3 } }
+} }

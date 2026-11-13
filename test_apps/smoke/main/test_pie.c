@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * PIE (ESP32-P4, ESP32-S31): one or two cases per instruction, each checked
  * against what silicon produced. With sdkconfig.pie_full, the full case set
  * instead, printed for the board-vs-emulator differential test.

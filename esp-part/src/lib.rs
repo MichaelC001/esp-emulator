@@ -45,31 +45,54 @@ pub mod proto {
 }
 
 pub use proto::{
-    bus_request, claim, emulator_message::Payload, BusOp, BusReply, BusRequest, Claim, EmulatorMessage,
-    GpioClaim, GpioDrive, I2cClaim, I2cTransaction, PartConfig, PartState, Register, SpiClaim,
-    SpiTransfer,
+    bus_request, claim, emulator_message::Payload, AnalogClaim, AnalogDrive, BusOp, BusReply, BusRequest,
+    Claim, EmulatorMessage, GpioClaim, GpioDrive, I2cClaim, I2cTransaction, PartConfig, PartState,
+    PwmState, Register, SpiClaim, SpiTransfer, UartClaim, UartRx, UartTx,
 };
 
 /// What a part's `lib.rs` needs.
 pub mod prelude {
     pub use crate::proto::{
         bus_request, claim, BusOp, BusReply, BusRequest, Claim, EmulatorMessage, GpioClaim, GpioDrive,
-        I2cClaim, I2cTransaction, PartConfig, Register, SpiClaim, SpiTransfer,
+        I2cClaim, I2cTransaction, PartConfig, PwmState, Register, SpiClaim, SpiTransfer, UartClaim,
     };
-    pub use crate::{drive, drives, set_value, watches, Device, State};
+    pub use crate::{analog, drive, drives, hold, reads_pwm, serial, set_value, transmit, watches, Device, State};
 }
 
 /// The claim to drive `pins` (bit N for GPIO N): the emulator refuses them
 /// to every other part.
 pub fn drives(pins: u64) -> Claim {
-    Claim { what: Some(claim::What::Gpio(GpioClaim { drive_pins: pins, watch_pins: 0 })) }
+    Claim { what: Some(claim::What::Gpio(GpioClaim { drive_pins: pins, watch_pins: 0, pwm_pins: 0 })) }
 }
 
 /// The claim to be told every transition of `pins`, each at its own time,
 /// where a pin nobody watches arrives as its level once a tick. Not
 /// exclusive, and a pin the part drives may be watched too.
 pub fn watches(pins: u64) -> Claim {
-    Claim { what: Some(claim::What::Gpio(GpioClaim { drive_pins: 0, watch_pins: pins })) }
+    Claim { what: Some(claim::What::Gpio(GpioClaim { drive_pins: 0, watch_pins: pins, pwm_pins: 0 })) }
+}
+
+/// The claim to be told the waveform a PWM block puts on `pins` (bit N for
+/// GPIO N) when it changes: a period and a high time, not edges. Not
+/// exclusive. What a servo, a buzzer, a dimmed LED or a motor driver claims;
+/// the waveform arrives at [`Device::on_pwm`].
+pub fn reads_pwm(pins: u64) -> Claim {
+    Claim { what: Some(claim::What::Gpio(GpioClaim { drive_pins: 0, watch_pins: 0, pwm_pins: pins })) }
+}
+
+/// The claim to be the serial device whose own TX pin the board wired to pad
+/// `tx` and whose RX pin to `rx`. The contract names a line from the chip's
+/// end (the chip transmits on the device's RX), so the swap is made here. A
+/// pin the board left unconnected stays out, and the emulator refuses the
+/// claim and says so.
+pub fn serial(tx: Option<u32>, rx: Option<u32>) -> Claim {
+    Claim { what: Some(claim::What::Uart(UartClaim { tx_pin: rx, rx_pin: tx })) }
+}
+
+/// The claim to put a voltage on analog pad `pin`: the emulator refuses a pad
+/// with no ADC channel, and a pad another part drives.
+pub fn analog(pin: u32) -> Claim {
+    Claim { what: Some(claim::What::Analog(AnalogClaim { pin })) }
 }
 
 /// The component a part models. Each method is one call of
@@ -87,14 +110,24 @@ pub trait Device: Default {
     /// the host fails the part naming `part_on_bus`.
     const ON_BUS: bool = false;
 
+    /// Whether the device takes one-way messages, `part_on_message`, as
+    /// [`ON_BUS`](Self::ON_BUS) is for `part_on_bus`: `true` on a device that
+    /// claims a serial line ([`serial`]) or reads a pin as PWM
+    /// ([`reads_pwm`]) and implements the method for it,
+    /// [`on_uart`](Self::on_uart) or [`on_pwm`](Self::on_pwm). Left `false`,
+    /// `part_on_message` decodes nothing, which keeps the message decoder out
+    /// of a part that is sent no messages.
+    const ON_MESSAGE: bool = false;
+
     /// Where the board wired the part, by the part's own pin names, and what
     /// it strapped: `config.pins.get("A")`, `config.addr`. Called once,
     /// before anything else, and never again.
     fn configure(&mut self, config: &PartConfig);
 
     /// What the part answers for: the pins it drives (`drives`), the I2C
-    /// address or the SPI chip select it is, on the pins the board wired;
-    /// and the pins it wants every transition of (`watches`). The emulator
+    /// address or the SPI chip select it is, on the pins the board wired, the
+    /// analog pads it puts a voltage on (`analog`); and the pins it wants
+    /// every transition of (`watches`). The emulator
     /// refuses a claim another part holds, so two parts cannot fight over
     /// one line. See `Register.claims` in `proto/esp_cosim.proto`.
     fn claims(&self) -> Vec<Claim>;
@@ -122,6 +155,19 @@ pub trait Device: Default {
     fn on_bus(&mut self, _request: &BusRequest) -> Option<BusReply> {
         None
     }
+
+    /// Bytes the chip transmitted on the serial line the part claimed, in
+    /// order, in pieces: one frame may arrive in two calls and two frames in
+    /// one. Nothing waits on an answer; the device answers, if it does, from
+    /// [`poll`](Self::poll) with [`transmit`].
+    fn on_uart(&mut self, _data: &[u8]) {}
+
+    /// The waveform on a pin the part reads as PWM, when it changes: period
+    /// and high time in nanoseconds. A period of 0 is no waveform, and the
+    /// pin's level is then the one [`on_pins`](Self::on_pins) reports; a high
+    /// time of 0, or of the whole period, is a level the block holds. Keep
+    /// it: nothing is said again while it stays.
+    fn on_pwm(&mut self, _state: &PwmState) {}
 
     /// Somebody interacted with the part: `"press"`, `"warmer"`,
     /// `"set:temperature=30.5"` ([`set_value`]). The names are the part's
@@ -163,6 +209,18 @@ impl State {
 /// it. Stamped with the time `poll` was given, it lands now.
 pub fn drive(pin: u32, level: bool, at_ns: u64) -> EmulatorMessage {
     EmulatorMessage { sim_time_ns: at_ns, payload: Some(Payload::GpioDrive(GpioDrive { pin, level })) }
+}
+
+/// The voltage on analog pad `pin`, in millivolts, from `at_ns`, as
+/// [`Device::poll`] returns it. Held until the next one, across a chip reset.
+pub fn hold(pin: u32, millivolts: u32, at_ns: u64) -> EmulatorMessage {
+    EmulatorMessage { sim_time_ns: at_ns, payload: Some(Payload::AnalogDrive(AnalogDrive { pin, millivolts })) }
+}
+
+/// What the device transmits on its serial line, `data`, at `at_ns`, as
+/// [`Device::poll`] returns it. The emulator takes it when it arrives.
+pub fn transmit(data: &[u8], at_ns: u64) -> EmulatorMessage {
+    EmulatorMessage { sim_time_ns: at_ns, payload: Some(Payload::UartRx(UartRx { data: data.to_vec() })) }
 }
 
 /// `set:<name>=<value>`, the interaction that puts an exact value in one
@@ -245,6 +303,22 @@ impl<D: Device, const N: usize> Part<D, N> {
         }
     }
 
+    /// `part_on_message`: the first `len` bytes are an `EmulatorMessage`, a
+    /// one-way message addressed to the part, handed to the device's typed
+    /// method for its kind. One that does not decode, or of a kind the
+    /// device does not take, is ignored, like a frame that does not decode.
+    pub fn on_message(&mut self, len: i32) {
+        if !D::ON_MESSAGE {
+            return;
+        }
+        let Ok(msg) = EmulatorMessage::decode(Self::frame(&self.buffer, len)) else { return };
+        match msg.payload {
+            Some(Payload::UartTx(tx)) => self.device.on_uart(&tx.data),
+            Some(Payload::PwmState(state)) => self.device.on_pwm(&state),
+            _ => {}
+        }
+    }
+
     /// `part_poll`.
     pub fn poll(&mut self, now_ns: u64) -> i32 {
         match self.device.poll(now_ns) {
@@ -300,8 +374,10 @@ impl<D: Device, const N: usize> Slot<D, N> {
 /// ```
 ///
 /// The buffer holds every message either side passes: a bus request with a
-/// long write needs more than a button's drives. A host hands over nothing
-/// that does not fit, and a `BusRequest` that does not fit fails the part.
+/// long write needs more than a button's drives, and a serial device takes
+/// what the chip transmits 128 bytes at a time. A host hands over nothing
+/// that does not fit, and a `BusRequest` or a message that does not fit
+/// fails the part.
 #[macro_export]
 macro_rules! export_part {
     ($device:ty) => {
@@ -337,6 +413,10 @@ macro_rules! export_part {
         #[no_mangle]
         pub extern "C" fn part_on_bus(len: i32) -> i32 {
             __ESP_PART.with(|p| p.on_bus(len))
+        }
+        #[no_mangle]
+        pub extern "C" fn part_on_message(len: i32) {
+            __ESP_PART.with(|p| p.on_message(len))
         }
         #[no_mangle]
         pub extern "C" fn part_poll(now_ns: u64) -> i32 {
@@ -473,6 +553,98 @@ mod tests {
         let mut part = Part::<Deaf, 64>::default();
         part.buffer[..req.len()].copy_from_slice(&req);
         assert_eq!(part.on_bus(req.len() as i32), 0);
+    }
+
+    #[test]
+    fn a_serial_device_hears_what_the_chip_sent_and_answers_from_its_poll() {
+        #[derive(Default)]
+        struct Echo {
+            heard: Vec<u8>,
+        }
+        impl Device for Echo {
+            const NAME: &'static str = "echo";
+            const ON_MESSAGE: bool = true;
+            fn configure(&mut self, _: &PartConfig) {}
+            fn claims(&self) -> Vec<Claim> {
+                // The device's TX on pad 5 is the chip's RX, and the other way.
+                vec![serial(Some(5), Some(4))]
+            }
+            fn on_uart(&mut self, data: &[u8]) {
+                self.heard.extend_from_slice(data);
+            }
+            fn poll(&mut self, now_ns: u64) -> Option<EmulatorMessage> {
+                (!self.heard.is_empty()).then(|| transmit(&std::mem::take(&mut self.heard), now_ns))
+            }
+        }
+        let mut part = Part::<Echo, 256>::default();
+        let n = part.register() as usize;
+        let reg = Register::decode(&part.buffer[..n]).unwrap();
+        assert_eq!(
+            reg.claims,
+            [Claim { what: Some(claim::What::Uart(UartClaim { tx_pin: Some(4), rx_pin: Some(5) })) }]
+        );
+        let tx = EmulatorMessage {
+            sim_time_ns: 5,
+            payload: Some(Payload::UartTx(UartTx { port: 1, data: b"AT\r\n".to_vec() })),
+        }
+        .encode_to_vec();
+        part.buffer[..tx.len()].copy_from_slice(&tx);
+        part.on_message(tx.len() as i32);
+        let n = part.poll(7) as usize;
+        assert_eq!(EmulatorMessage::decode(&part.buffer[..n]).unwrap(), transmit(b"AT\r\n", 7));
+        assert_eq!(part.poll(8), 0, "said once");
+
+        // A message of another kind is not handed to on_uart.
+        let other = drive(9, false, 6).encode_to_vec();
+        part.buffer[..other.len()].copy_from_slice(&other);
+        part.on_message(other.len() as i32);
+        assert_eq!(part.poll(9), 0);
+
+        // A device that leaves ON_MESSAGE false is not told.
+        let mut part = Part::<Button, 64>::default();
+        part.buffer[..tx.len()].copy_from_slice(&tx);
+        part.on_message(tx.len() as i32);
+        assert_eq!(part.poll(9), 0);
+    }
+
+    #[test]
+    fn a_pwm_reader_is_told_the_waveform() {
+        #[derive(Default)]
+        struct Lamp {
+            told: Option<(u64, u64)>,
+        }
+        impl Device for Lamp {
+            const NAME: &'static str = "lamp";
+            const ON_MESSAGE: bool = true;
+            fn configure(&mut self, _: &PartConfig) {}
+            fn claims(&self) -> Vec<Claim> {
+                vec![reads_pwm(1 << 4)]
+            }
+            fn on_pwm(&mut self, state: &PwmState) {
+                self.told = Some((state.period_ns, state.high_ns));
+            }
+        }
+        let mut part = Part::<Lamp, 64>::default();
+        let n = part.register() as usize;
+        let reg = Register::decode(&part.buffer[..n]).unwrap();
+        assert_eq!(
+            reg.claims,
+            [Claim { what: Some(claim::What::Gpio(GpioClaim { drive_pins: 0, watch_pins: 0, pwm_pins: 1 << 4 })) }]
+        );
+        let w = EmulatorMessage {
+            sim_time_ns: 7,
+            payload: Some(Payload::PwmState(PwmState { pin: 4, period_ns: 20_000_000, high_ns: 1_500_000 })),
+        }
+        .encode_to_vec();
+        part.buffer[..w.len()].copy_from_slice(&w);
+        part.on_message(w.len() as i32);
+        assert_eq!(part.device.told, Some((20_000_000, 1_500_000)));
+
+        // A device that leaves ON_MESSAGE false is not handed it.
+        let mut part = Part::<Button, 64>::default();
+        part.buffer[..w.len()].copy_from_slice(&w);
+        part.on_message(w.len() as i32);
+        assert_eq!(part.poll(8), 0);
     }
 
     #[test]

@@ -41,8 +41,11 @@ The right-hand panel shows the machine live while it runs (refreshed a few times
 ## Virtual parts
 
 The browser build can add virtual components to the chip: a push button on a
-GPIO, an SHT31 sensor on I2C, a TMP123 sensor on SPI. `button-demo.html` and
-`sensor-demo.html` are the examples. See [PARTS.md](PARTS.md) for how to run
+GPIO, an SHT31 sensor on I2C, a TMP123 sensor on SPI, an MH-Z19B CO₂ sensor on
+a UART, a rotary encoder counted by PCNT, an SG90 servo read as PWM and a
+potentiometer on an ADC pad. `button-demo.html`, `sensor-demo.html`,
+`co2-demo.html`, `encoder-demo.html`, `servo-demo.html` and `adc-demo.html`
+are the examples. See [PARTS.md](PARTS.md) for how to run
 them, how to write a part of your own, and how to use parts in your own page.
 
 ## Browser Networking
@@ -323,6 +326,10 @@ www/
 ├── worker.js           # Web Worker: WASM emulation loop, relay URL
 ├── button-demo.html    # Virtual parts demo: C3 firmware + a push button (PARTS.md)
 ├── sensor-demo.html    # Virtual parts demo: C3 firmware + an I2C sensor (PARTS.md)
+├── co2-demo.html       # Virtual parts demo: C3 firmware + a serial CO2 sensor (PARTS.md)
+├── encoder-demo.html   # Virtual parts demo: C6 firmware + a rotary encoder on PCNT (PARTS.md)
+├── servo-demo.html     # Virtual parts demo: C3 firmware + a servo read as PWM (PARTS.md)
+├── adc-demo.html       # Virtual parts demo: C3 firmware + a potentiometer on an ADC pad (PARTS.md)
 ├── cosim.js            # CosimPump: connects the emulator to each part's worker
 ├── part-worker.js      # Web Worker: runs one part, a WebAssembly module
 ├── vendor/

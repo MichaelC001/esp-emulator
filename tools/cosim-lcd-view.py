@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+#
+# SPDX-License-Identifier: Apache-2.0
+
 """An SPI display on the co-simulation bus over --cosim-tcp, with no protobuf
 library: the ST7789 / ILI9341 command set, drawn into a PNG.
 
@@ -21,7 +25,7 @@ import time
 import sys
 import zlib
 
-from cosim_tcp import accepted, bus_reply, connect, decode, recv, register, send, spi_claim
+from cosim_tcp import accepted, bus_reply, bus_request, connect, decode, recv, register, send, spi_claim
 
 MAX_SIDE = 512          # the largest panel drawn, in either direction
 
@@ -176,19 +180,16 @@ def main():
             topic, payload = recv(s)
             if topic is None:
                 break
-            msg = decode(payload)
             if topic == "SIM/RESET":
                 panel.reset()
-            elif 7 in msg:                   # a BusRequest for this consumer
-                req = decode(msg[7])
-                if 3 not in req:
-                    continue
+            elif (br := bus_request(payload)) and 3 in br[1]:   # BusRequest.spi
+                cid, req = br
                 t = decode(req[3])
                 transfers += 1
                 panel.transfer(t)
                 rx_len = t.get(4, 0)
                 if rx_len:
-                    send(s, bus_reply(req.get(1, 0), bytes(rx_len)))
+                    send(s, bus_reply(cid, bytes(rx_len)))
             if panel.dirty and time.monotonic() - last >= a.every:
                 write()
     except KeyboardInterrupt:

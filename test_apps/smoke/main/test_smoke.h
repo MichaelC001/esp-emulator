@@ -1,4 +1,10 @@
 /*
+ * SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
  * Shared plumbing for the esp-emu smoke app.
  *
  * Every test lives in a topic file (test_storage.c, test_freertos.c, ...) and
@@ -58,6 +64,9 @@
 #endif
 #if SOC_I2C_SUPPORTED
 #include "driver/i2c_master.h"
+#endif
+#if SOC_I2S_SUPPORTED
+#include "driver/i2s_std.h"
 #endif
 #if SOC_GPSPI_SUPPORTED
 #include "driver/spi_master.h"
@@ -126,6 +135,9 @@ bool test_ledc(void);
 #endif
 #if SOC_I2C_SUPPORTED
 bool test_i2c(void);
+#endif
+#if SOC_I2S_SUPPORTED
+bool test_i2s(void);
 #endif
 
 /* --- test_timer.c --- */
